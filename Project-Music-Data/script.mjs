@@ -4,12 +4,30 @@ import { getDay, isFridayNight } from "./src/utils/time.mjs";
 import { countBy, sumBy, topN } from "./src/utils/aggregate.mjs";
 import { intersection } from "./src/utils/set.mjs";
 
-// Helper to create QA row HTML
-function qaRow(question, answer) {
-  return answer
-    ? `<tr><td><strong>${question}</strong></td><td>${answer}</td></tr>`
-    : "";
+function createCell(tag, text) {
+  const cell = document.createElement(tag);
+  cell.textContent = text;
+  return cell;
 }
+
+function createRow(question, answer) {
+  if (!answer) return null;
+
+  const tr = document.createElement("tr");
+
+  const qCell = document.createElement("td");
+  const strong = document.createElement("strong");
+  strong.textContent = question;
+  qCell.appendChild(strong);
+
+  const aCell = createCell("td", answer);
+
+  tr.appendChild(qCell);
+  tr.appendChild(aCell);
+
+  return tr;
+}
+
 
 window.onload = function () {
   const userSelect = document.getElementById("userSelect");
@@ -141,77 +159,101 @@ window.onload = function () {
 
     const topArtistByTimeDuration = artistDurations[topArtistByTime] || 0;
 
-    // Build QA table
-    const table = document.createElement("table");
-    table.border = "1";
-    table.cellPadding = "6";
-    table.cellSpacing = "0";
+    // Clear results safely
+resultsDiv.replaceChildren();
 
-    const thead = document.createElement("thead");
-    thead.innerHTML = `<tr><th>Question</th><th>Answer</th></tr>`;
-    table.appendChild(thead);
+// Create table
+const table = document.createElement("table");
+table.border = "1";
+table.cellPadding = "6";
+table.cellSpacing = "0";
 
-    const tbody = document.createElement("tbody");
-    table.appendChild(tbody);
+// Table header
+const thead = document.createElement("thead");
+const headerRow = document.createElement("tr");
+headerRow.appendChild(createCell("th", "Question"));
+headerRow.appendChild(createCell("th", "Answer"));
+thead.appendChild(headerRow);
 
-    const addRow = (q, a) => {
-      if (!a) return;
-      const tr = document.createElement("tr");
-      const tdQ = document.createElement("td");
-      tdQ.appendChild(document.createElement("strong")).textContent = q;
-      const tdA = document.createElement("td");
-      tdA.textContent = a;
-      tr.appendChild(tdQ);
-      tr.appendChild(tdA);
-      tbody.appendChild(tr);
-    };
+// Table body
+const tbody = document.createElement("tbody");
 
-    addRow(
-      "Most listened song (count):",
-      topSong
-        ? `${topSong.artist} - ${topSong.title} (${topSongCount} times)`
-        : null,
-    );
-    addRow(
-      "Most listened song (time):",
-      topSongByTime ? `${topSongByTime.artist} - ${topSongByTime.title}` : null,
-    );
-    addRow(
-      "Most listened artist (count):",
-      topArtist ? `${topArtist} (${topArtistCount} times)` : null,
-    );
-    addRow(
-      "Most listened artist (time):",
-      topArtistByTime
-        ? `${topArtistByTime} (${Math.round(topArtistByTimeDuration / 60)} min)`
-        : null,
-    );
-    addRow(
-      "Friday night song (count):",
-      topFridaySong ? `${topFridaySong.artist} - ${topFridaySong.title}` : null,
-    );
-    addRow(
-      "Friday night song (time):",
-      topFridaySongByTime
-        ? `${topFridaySongByTime.artist} - ${topFridaySongByTime.title}`
-        : null,
-    );
-    addRow(
-      "Longest streak song:",
-      topStreakSongs.length && maxStreak > 1
-        ? topStreakSongs
-            .map((s) => `${s.artist} - ${s.title} (${maxStreak} times)`)
-            .join(", ")
-        : null,
-    );
-    addRow(
-      "Every day songs:",
-      everyDaySongTitles.length ? everyDaySongTitles.join(", ") : null,
-    );
-    if (genreEntries.length) {
-      addRow(genreLabel + ":", genreEntries.map(([g]) => g).join(", "));
-    }
+// Helper to add rows
+function addRow(question, answer) {
+  const row = createRow(question, answer);
+  if (row) tbody.appendChild(row);
+}
 
-    resultsDiv.appendChild(table);
+// Add rows
+addRow(
+  "Most listened song (count):",
+  topSong
+    ? `${topSong.artist} - ${topSong.title} (${topSongCount} times)`
+    : null
+);
+
+addRow(
+  "Most listened song (time):",
+  topSongByTime
+    ? `${topSongByTime.artist} - ${topSongByTime.title}`
+    : null
+);
+
+addRow(
+  "Most listened artist (count):",
+  topArtist
+    ? `${topArtist} (${topArtistCount} times)`
+    : null
+);
+
+addRow(
+  "Most listened artist (time):",
+  topArtistByTime
+    ? `${topArtistByTime} (${Math.round(topArtistByTimeDuration / 60)} min)`
+    : null
+);
+
+addRow(
+  "Friday night song (count):",
+  topFridaySong
+    ? `${topFridaySong.artist} - ${topFridaySong.title}`
+    : null
+);
+
+addRow(
+  "Friday night song (time):",
+  topFridaySongByTime
+    ? `${topFridaySongByTime.artist} - ${topFridaySongByTime.title}`
+    : null
+);
+
+addRow(
+  "Longest streak song:",
+  topStreakSongs.length && maxStreak > 1
+    ? topStreakSongs
+        .map((s) => `${s.artist} - ${s.title} (${maxStreak} times)`)
+        .join(", ")
+    : null
+);
+
+addRow(
+  "Every day songs:",
+  everyDaySongTitles.length
+    ? everyDaySongTitles.join(", ")
+    : null
+);
+
+if (genreEntries.length) {
+  addRow(
+    genreLabel + ":",
+    genreEntries.map(([g]) => g).join(", ")
+  );
+}
+
+// Assemble table
+table.appendChild(thead);
+table.appendChild(tbody);
+resultsDiv.appendChild(table);
+
   });
-};
+}
