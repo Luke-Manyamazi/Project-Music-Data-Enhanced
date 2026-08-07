@@ -1,20 +1,39 @@
-// Core Display Script for Music Stats Analysis
-
+// script.mjs
 import { getUserIDs, getListenEvents, getSong } from "./data.mjs";
 import { getDay, isFridayNight } from "./src/utils/time.mjs";
 import { countBy, sumBy, topN } from "./src/utils/aggregate.mjs";
 import { intersection } from "./src/utils/set.mjs";
 
-function qaRow(question, answer) {
-  return answer
-    ? `<tr><td><strong>${question}</strong></td><td>${answer}</td></tr>`
-    : "";
+function createCell(tag, text) {
+  const cell = document.createElement(tag);
+  cell.textContent = text;
+  return cell;
 }
+
+function createRow(question, answer) {
+  if (!answer) return null;
+
+  const tr = document.createElement("tr");
+
+  const qCell = document.createElement("td");
+  const strong = document.createElement("strong");
+  strong.textContent = question;
+  qCell.appendChild(strong);
+
+  const aCell = createCell("td", answer);
+
+  tr.appendChild(qCell);
+  tr.appendChild(aCell);
+
+  return tr;
+}
+
 
 window.onload = function () {
   const userSelect = document.getElementById("userSelect");
-  const userIDs = getUserIDs();
+  const resultsDiv = document.getElementById("results");
 
+  // Populate user dropdown
   const defaultOption = document.createElement("option");
   defaultOption.value = "";
   defaultOption.textContent = "Select User";
@@ -22,31 +41,29 @@ window.onload = function () {
   defaultOption.selected = true;
   userSelect.appendChild(defaultOption);
 
-  userIDs.forEach((userID) => {
+  getUserIDs().forEach((userID) => {
     const option = document.createElement("option");
     option.value = userID;
     option.textContent = `User ${userID}`;
     userSelect.appendChild(option);
   });
 
+  // Handle user selection
   userSelect.addEventListener("change", (event) => {
     const selectedUser = event.target.value;
-    const resultsDiv = document.getElementById("results");
-    const instruction = document.getElementById("instruction");
-
     resultsDiv.innerHTML = "";
 
-    if (instruction) instruction.style.display = "none";
     if (!selectedUser) return;
 
     const listens = getListenEvents(Number(selectedUser)) || [];
     if (listens.length === 0) {
-      resultsDiv.innerHTML = `<p>This user didn't listen to any songs.</p>`;
+      resultsDiv.textContent = "This user didn't listen to any songs.";
       return;
     }
 
     listens.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
 
+    // Most listened songs/artists (count)
     const songCounts = countBy(listens, (l) => l.song_id);
     const [topSongID, topSongCount] = topN(songCounts, 1)[0] || [];
     const topSong = topSongID ? getSong(topSongID) : null;
@@ -54,38 +71,33 @@ window.onload = function () {
     const artistCounts = countBy(listens, (l) => getSong(l.song_id)?.artist);
     const [topArtist, topArtistCount] = topN(artistCounts, 1)[0] || [];
 
-    const fridayListens = listens.filter((l) =>
-      isFridayNight(l.timestamp)
-    );
+    // Friday night listens
+    const fridayListens = listens.filter((l) => isFridayNight(l.timestamp));
     const fridaySongCounts = countBy(fridayListens, (l) => l.song_id);
     const [topFridaySongID] = topN(fridaySongCounts, 1)[0] || [];
-    const topFridaySong = topFridaySongID
-      ? getSong(topFridaySongID)
-      : null;
+    const topFridaySong = topFridaySongID ? getSong(topFridaySongID) : null;
 
+    // Most listened songs/artists by time
     const songDurations = sumBy(
       listens,
       (l) => l.song_id,
-      (l) => getSong(l.song_id)?.duration_seconds || 0
+      (l) => getSong(l.song_id)?.duration_seconds || 0,
     );
     const [topSongByTimeID] = topN(songDurations, 1)[0] || [];
-    const topSongByTime = topSongByTimeID
-      ? getSong(topSongByTimeID)
-      : null;
+    const topSongByTime = topSongByTimeID ? getSong(topSongByTimeID) : null;
 
     const artistDurations = sumBy(
       listens,
       (l) => getSong(l.song_id)?.artist,
-      (l) => getSong(l.song_id)?.duration_seconds || 0
+      (l) => getSong(l.song_id)?.duration_seconds || 0,
     );
     const [topArtistByTime] = topN(artistDurations, 1)[0] || [];
 
-    // Longest streak
-    let maxStreak = 0;
-    let curStreak = 0;
-    let prevSongID = null;
+    // Longest streak song
+    let maxStreak = 0,
+      curStreak = 0,
+      prevSongID = null;
     const streaks = {};
-
     for (const l of listens) {
       if (l.song_id === prevSongID) {
         curStreak++;
@@ -96,120 +108,152 @@ window.onload = function () {
       streaks[l.song_id] = Math.max(streaks[l.song_id] || 0, curStreak);
       maxStreak = Math.max(maxStreak, curStreak);
     }
-
     const topStreakSongs = Object.entries(streaks)
       .filter(([_, count]) => count === maxStreak)
       .map(([id]) => getSong(id))
       .filter(Boolean);
 
-    // Songs listened to every day
-    const days = {};
-    for (const l of listens) {
-      const day = getDay(l.timestamp);
-      if (!days[day]) days[day] = new Set();
-      days[day].add(l.song_id);
+    // --- Songs listened to every day (local timezone safe) ---
+    const daysMap = new Map();
+
+    for (const listen of listens) {
+      const day = getDay(listen.timestamp); // local YYYY-MM-DD
+      if (!daysMap.has(day)) {
+        daysMap.set(day, new Set());
+      }
+      daysMap.get(day).add(listen.song_id);
     }
 
-    const dayArrays = Object.values(days).map((set) => [...set]);
-    const everyDaySongs = intersection(dayArrays);
-    const everyDaySongTitles = [...everyDaySongs]
+    // Convert Map values (Sets) into arrays
+    const dayArrays = Array.from(daysMap.values(), (set) => [...set]);
+
+    // intersection() returns a Set
+    const everyDaySongIDs = intersection(dayArrays);
+
+    // ✅ Convert Set → Array before mapping
+    const everyDaySongTitles = [...everyDaySongIDs]
       .map((id) => {
-        const s = getSong(id);
-        return s ? `${s.artist} - ${s.title}` : null;
+        const song = getSong(id);
+        return song ? `${song.artist} - ${song.title}` : null;
       })
       .filter(Boolean);
 
-    const genreCounts = countBy(listens, (l) =>
-      getSong(l.song_id)?.genre
-    );
+    // Top genres
+    const genreCounts = countBy(listens, (l) => getSong(l.song_id)?.genre);
     const genreEntries = topN(genreCounts, 3);
     const genreLabel =
       genreEntries.length === 1
         ? "Top genre"
         : `Top ${genreEntries.length} genres`;
 
+    // Friday night by time
     const fridaySongDurations = sumBy(
       fridayListens,
       (l) => l.song_id,
-      (l) => getSong(l.song_id)?.duration_seconds || 0
+      (l) => getSong(l.song_id)?.duration_seconds || 0,
     );
     const [topFridaySongByTimeID] = topN(fridaySongDurations, 1)[0] || [];
     const topFridaySongByTime = topFridaySongByTimeID
       ? getSong(topFridaySongByTimeID)
       : null;
 
-    const topArtistByTimeDuration =
-      artistDurations[topArtistByTime] || 0;
+    const topArtistByTimeDuration = artistDurations[topArtistByTime] || 0;
 
-    // Build QA table (still string-based — XSS fix comes next)
-    let html = `<table border="1" cellpadding="6" cellspacing="0">
-      <thead>
-        <tr><th>Question</th><th>Answer</th></tr>
-      </thead>
-      <tbody>`;
+    // Clear results safely
+resultsDiv.replaceChildren();
 
-    html += qaRow(
-      "Most listened song (count):",
-      topSong
-        ? `${topSong.artist} - ${topSong.title} (${topSongCount} times)`
-        : null
-    );
-    html += qaRow(
-      "Most listened song (time):",
-      topSongByTime
-        ? `${topSongByTime.artist} - ${topSongByTime.title}`
-        : null
-    );
-    html += qaRow(
-      "Most listened artist (count):",
-      topArtist
-        ? `${topArtist} (${topArtistCount} times)`
-        : null
-    );
-    html += qaRow(
-      "Most listened artist (time):",
-      topArtistByTime
-        ? `${topArtistByTime} (${Math.round(
-            topArtistByTimeDuration / 60
-          )} min)`
-        : null
-    );
-    html += qaRow(
-      "Friday night song (count):",
-      topFridaySong
-        ? `${topFridaySong.artist} - ${topFridaySong.title}`
-        : null
-    );
-    html += qaRow(
-      "Friday night song (time):",
-      topFridaySongByTime
-        ? `${topFridaySongByTime.artist} - ${topFridaySongByTime.title}`
-        : null
-    );
-    html += qaRow(
-      "Longest streak song:",
-      topStreakSongs.length && maxStreak > 1
-        ? topStreakSongs
-            .map(
-              (s) => `${s.artist} - ${s.title} (${maxStreak} times)`
-            )
-            .join(", ")
-        : null
-    );
-    html += qaRow(
-      "Every day songs:",
-      everyDaySongTitles.length
-        ? everyDaySongTitles.join(", ")
-        : null
-    );
-    html += genreEntries.length
-      ? qaRow(
-          `${genreLabel}:`,
-          genreEntries.map(([g]) => g).join(", ")
-        )
-      : "";
+// Create table
+const table = document.createElement("table");
+table.border = "1";
+table.cellPadding = "6";
+table.cellSpacing = "0";
 
-    html += `</tbody></table>`;
-    resultsDiv.innerHTML = html;
+// Table header
+const thead = document.createElement("thead");
+const headerRow = document.createElement("tr");
+headerRow.appendChild(createCell("th", "Question"));
+headerRow.appendChild(createCell("th", "Answer"));
+thead.appendChild(headerRow);
+
+// Table body
+const tbody = document.createElement("tbody");
+
+// Helper to add rows
+function addRow(question, answer) {
+  const row = createRow(question, answer);
+  if (row) tbody.appendChild(row);
+}
+
+// Add rows
+addRow(
+  "Most listened song (count):",
+  topSong
+    ? `${topSong.artist} - ${topSong.title} (${topSongCount} times)`
+    : null
+);
+
+addRow(
+  "Most listened song (time):",
+  topSongByTime
+    ? `${topSongByTime.artist} - ${topSongByTime.title}`
+    : null
+);
+
+addRow(
+  "Most listened artist (count):",
+  topArtist
+    ? `${topArtist} (${topArtistCount} times)`
+    : null
+);
+
+addRow(
+  "Most listened artist (time):",
+  topArtistByTime
+    ? `${topArtistByTime} (${Math.round(topArtistByTimeDuration / 60)} min)`
+    : null
+);
+
+addRow(
+  "Friday night song (count):",
+  topFridaySong
+    ? `${topFridaySong.artist} - ${topFridaySong.title}`
+    : null
+);
+
+addRow(
+  "Friday night song (time):",
+  topFridaySongByTime
+    ? `${topFridaySongByTime.artist} - ${topFridaySongByTime.title}`
+    : null
+);
+
+addRow(
+  "Longest streak song:",
+  topStreakSongs.length && maxStreak > 1
+    ? topStreakSongs
+        .map((s) => `${s.artist} - ${s.title} (${maxStreak} times)`)
+        .join(", ")
+    : null
+);
+
+addRow(
+  "Every day songs:",
+  everyDaySongTitles.length
+    ? everyDaySongTitles.join(", ")
+    : null
+);
+
+if (genreEntries.length) {
+  addRow(
+    genreLabel + ":",
+    genreEntries.map(([g]) => g).join(", ")
+  );
+}
+
+// Assemble table
+table.appendChild(thead);
+table.appendChild(tbody);
+resultsDiv.appendChild(table);
+
   });
-};
+}
